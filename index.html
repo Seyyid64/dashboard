@@ -120,13 +120,18 @@
                 "September","Oktober","November","Dezember"];
   // =========================================================
 
+  // Aktuelle Zeit in der Türkei (UTC+3, keine Sommerzeit) – unabhängig von der Geräteeinstellung
+  function nowTR() {
+    var d = new Date();
+    return new Date(d.getTime() + (TZ*60 + d.getTimezoneOffset())*60000);
+  }
   var pad = function (n) { return (n < 10 ? "0" : "") + n; };
   var dayKey = function (d) { return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); };
   var toMin = function (t) { var p = t.split(":"); return +p[0]*60 + +p[1]; };
 
   // ---------- Uhr & Datum ----------
   function tickClock() {
-    var d = new Date();
+    var d = nowTR();
     document.getElementById("time").innerHTML =
       pad(d.getHours()) + ":" + pad(d.getMinutes()) + "<small>" + pad(d.getSeconds()) + "</small>";
     document.getElementById("date").textContent =
@@ -135,7 +140,7 @@
 
   // ---------- Kalender ----------
   function renderCalendar() {
-    var now = new Date(), y = now.getFullYear(), m = now.getMonth();
+    var now = nowTR(), y = now.getFullYear(), m = now.getMonth();
     document.getElementById("c-title").textContent = MONTHS[m] + " " + y;
     var html = "";
     var order = [1,2,3,4,5,6,0]; // Montag zuerst
@@ -185,7 +190,7 @@
   }
 
   function loadPrayers() {
-    var d = new Date(), done = false;
+    var d = nowTR(), done = false;
     var url = "https://api.aladhan.com/v1/timings/" + pad(d.getDate())+"-"+pad(d.getMonth()+1)+"-"+d.getFullYear()
             + "?latitude="+LAT+"&longitude="+LNG+"&method=13";
     var useLocal = function () {
@@ -207,7 +212,7 @@
 
   function renderPrayers() {
     if (!timings) return;
-    var now = new Date(), nowMin = now.getHours()*60 + now.getMinutes();
+    var now = nowTR(), nowMin = now.getHours()*60 + now.getMinutes();
     var html = "", next = null;
     PRAYER_ORDER.forEach(function (k) {
       var t = timings[k].substring(0,5), cls = "p-row";
@@ -267,7 +272,7 @@
   tickClock(); renderCalendar(); loadPrayers(); loadWeather();
   setInterval(tickClock, 1000);
   setInterval(function () {
-    if (timingsFor !== dayKey(new Date())) { loadPrayers(); renderCalendar(); }
+    if (timingsFor !== dayKey(nowTR())) { loadPrayers(); renderCalendar(); }
     else renderPrayers();
   }, 60000);
   setInterval(loadWeather, 30 * 60000);                 // Wetter alle 30 Min.
