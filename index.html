@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard</title>
+<style>
+  :root {
+    --bg: #e8ecf0;
+    --ink: #15202b;
+    --ink-soft: rgba(21,32,43,.55);
+    --line: rgba(21,32,43,.12);
+    --accent: #1f6f78;
+    --accent-soft: rgba(31,111,120,.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .grid {
+    display: grid;
+    height: 100vh;
+    padding: 3vh 3vw;
+    gap: 3vh 3vw;
+    grid-template-columns: 1.15fr 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "clock   weather"
+      "prayer  calendar";
+  }
+  section { min-width: 0; min-height: 0; }
+
+  /* Uhr */
+  .clock { grid-area: clock; }
+  .time { font-size: 15vh; font-weight: 200; line-height: 1; letter-spacing: -.02em; }
+  .time small { font-size: .45em; font-weight: 300; color: var(--ink-soft); margin-left: .1em; }
+  .date { font-size: 3.4vh; font-weight: 300; margin-top: 1.2vh; }
+  .hijri { font-size: 2.4vh; color: var(--ink-soft); margin-top: .5vh; }
+
+  /* Wetter */
+  .weather { grid-area: weather; display: flex; flex-direction: column; justify-content: space-between; }
+  .w-now { display: flex; align-items: center; gap: 2vw; }
+  .w-icon { font-size: 11vh; line-height: 1; }
+  .w-temp { font-size: 11vh; font-weight: 200; line-height: 1; }
+  .w-desc { font-size: 3vh; font-weight: 300; }
+  .w-meta { font-size: 2.2vh; color: var(--ink-soft); margin-top: .6vh; }
+  .w-days { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 1.5vh; margin-top: 1.5vh; }
+  .w-day { text-align: center; font-size: 2.2vh; }
+  .w-day .ic { font-size: 4vh; margin: .4vh 0; }
+  .w-day .lo { color: var(--ink-soft); }
+
+  /* Gebetszeiten */
+  .prayer { grid-area: prayer; display: flex; flex-direction: column; justify-content: center; }
+  .p-row { display: flex; justify-content: space-between; align-items: baseline;
+           font-size: 4.2vh; font-weight: 300; padding: .9vh 1vw; border-radius: .8vh; }
+  .p-row.past { color: var(--ink-soft); }
+  .p-row.next { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .p-foot { margin-top: 1.5vh; padding: 0 1vw; font-size: 2.4vh; color: var(--ink-soft); }
+
+  /* Kalender */
+  .calendar { grid-area: calendar; display: flex; flex-direction: column; }
+  .c-title { font-size: 3.4vh; font-weight: 300; margin-bottom: 1.2vh; }
+  .c-grid { display: grid; grid-template-columns: repeat(7, 1fr); flex: 1; gap: .4vh; }
+  .c-grid div { display: flex; align-items: center; justify-content: center; font-size: 2.8vh; border-radius: .8vh; }
+  .c-head { font-size: 2vh !important; color: var(--ink-soft); font-weight: 500; }
+  .c-out { color: rgba(21,32,43,.22); }
+  .c-sun { color: var(--ink-soft); }
+  .c-today { background: var(--accent); color: #fff; font-weight: 600; }
+
+  .muted { color: var(--ink-soft); font-size: 2.4vh; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section class="clock">
+    <div class="time" id="time">--:--</div>
+    <div class="date" id="date"></div>
+    <div class="hijri" id="hijri"></div>
+  </section>
+
+  <section class="weather">
+    <div class="w-now" id="w-now"><span class="muted">Wetter wird geladen …</span></div>
+    <div class="w-days" id="w-days"></div>
+  </section>
+
+  <section class="prayer">
+    <div id="p-list"></div>
+    <div class="p-foot" id="p-foot"></div>
+  </section>
+
+  <section class="calendar">
+    <div class="c-title" id="c-title"></div>
+    <div class="c-grid" id="c-grid"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  // ===================== Einstellungen =====================
+  var LAT = 40.77, LNG = 30.40, TZ = 3;   // Sakarya (UTC+3)
+  var PRAYER_NAMES = { Fajr:"İmsak", Sunrise:"Güneş", Dhuhr:"Öğle",
+                       Asr:"İkindi", Maghrib:"Akşam", Isha:"Yatsı" };
+  var PRAYER_ORDER = ["Fajr","Sunrise","Dhuhr","Asr","Maghrib","Isha"];
+  var WEEKDAYS = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+  var WEEKDAYS_SHORT = ["So","Mo","Di","Mi","Do","Fr","Sa"];
+  var MONTHS = ["Januar","Februar","März","April","Mai","Juni","Juli","August",
+                "September","Oktober","November","Dezember"];
+  // =========================================================
+
+  var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  var dayKey = function (d) { return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); };
+  var toMin = function (t) { var p = t.split(":"); return +p[0]*60 + +p[1]; };
+
+  // ---------- Uhr & Datum ----------
+  function tickClock() {
+    var d = new Date();
+    document.getElementById("time").innerHTML =
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + "<small>" + pad(d.getSeconds()) + "</small>";
+    document.getElementById("date").textContent =
+      WEEKDAYS[d.getDay()] + ", " + d.getDate() + ". " + MONTHS[d.getMonth()] + " " + d.getFullYear();
+  }
+
+  // ---------- Kalender ----------
+  function renderCalendar() {
+    var now = new Date(), y = now.getFullYear(), m = now.getMonth();
+    document.getElementById("c-title").textContent = MONTHS[m] + " " + y;
+    var html = "";
+    var order = [1,2,3,4,5,6,0]; // Montag zuerst
+    order.forEach(function (i) { html += '<div class="c-head">' + WEEKDAYS_SHORT[i] + "</div>"; });
+    var first = new Date(y, m, 1);
+    var offset = (first.getDay() + 6) % 7;
+    var daysInMonth = new Date(y, m+1, 0).getDate();
+    var daysPrev = new Date(y, m, 0).getDate();
+    var cells = Math.ceil((offset + daysInMonth) / 7) * 7;
+    for (var i = 0; i < cells; i++) {
+      var dayNum = i - offset + 1, cls = "";
+      if (dayNum < 1) { dayNum = daysPrev + dayNum; cls = "c-out"; }
+      else if (dayNum > daysInMonth) { dayNum -= daysInMonth; cls = "c-out"; }
+      else {
+        if (dayNum === now.getDate()) cls = "c-today";
+        else if (i % 7 === 6) cls = "c-sun";
+      }
+      html += '<div class="' + cls + '">' + dayNum + "</div>";
+    }
+    document.getElementById("c-grid").innerHTML = html;
+  }
+
+  // ---------- Gebetszeiten ----------
+  var timings = null, timingsFor = null;
+
+  function calcPrayers(d) {
+    var rad = Math.PI/180;
+    var jd = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())/86400000 + 2440587.5 - 2451545;
+    var g = rad*(357.529 + 0.98560028*jd), q = 280.459 + 0.98564736*jd;
+    var L = rad*(q + 1.915*Math.sin(g) + 0.020*Math.sin(2*g));
+    var e = rad*(23.439 - 0.00000036*jd);
+    var RA = Math.atan2(Math.cos(e)*Math.sin(L), Math.cos(L))/rad/15;
+    RA = ((RA % 24) + 24) % 24;
+    var decl = Math.asin(Math.sin(e)*Math.sin(L));
+    var eqt = (q/15 - RA); eqt = ((eqt + 12) % 24 + 24) % 24 - 12;
+    var noon = 12 - LNG/15 - eqt + TZ, lat = LAT*rad;
+    function H(angle) {
+      var c = (-Math.sin(angle*rad) - Math.sin(lat)*Math.sin(decl)) / (Math.cos(lat)*Math.cos(decl));
+      return Math.acos(Math.max(-1, Math.min(1, c)))/rad/15;
+    }
+    var asrAng = -Math.atan(1/(1 + Math.tan(Math.abs(lat - decl))))/rad;
+    var t = { Fajr: noon - H(18), Sunrise: noon - H(0.833), Dhuhr: noon + 2/60,
+              Asr: noon + H(asrAng), Maghrib: noon + H(0.833), Isha: noon + H(17) };
+    var out = {};
+    for (var k in t) { var mm = Math.round(t[k]*60) % 1440; out[k] = pad(Math.floor(mm/60)) + ":" + pad(mm % 60); }
+    return out;
+  }
+
+  function loadPrayers() {
+    var d = new Date(), done = false;
+    var url = "https://api.aladhan.com/v1/timings/" + pad(d.getDate())+"-"+pad(d.getMonth()+1)+"-"+d.getFullYear()
+            + "?latitude="+LAT+"&longitude="+LNG+"&method=13";
+    var useLocal = function () {
+      if (done) return; done = true;
+      timings = calcPrayers(d); timingsFor = dayKey(d);
+      document.getElementById("hijri").textContent = "";
+      renderPrayers();
+    };
+    var timer = setTimeout(useLocal, 8000);
+    fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+      if (done || !j || j.code !== 200) { useLocal(); return; }
+      clearTimeout(timer); done = true;
+      timings = j.data.timings; timingsFor = dayKey(d);
+      var h = j.data.date.hijri;
+      document.getElementById("hijri").textContent = h.day + " " + h.month.en + " " + h.year;
+      renderPrayers();
+    }).catch(useLocal);
+  }
+
+  function renderPrayers() {
+    if (!timings) return;
+    var now = new Date(), nowMin = now.getHours()*60 + now.getMinutes();
+    var html = "", next = null;
+    PRAYER_ORDER.forEach(function (k) {
+      var t = timings[k].substring(0,5), cls = "p-row";
+      if (toMin(t) <= nowMin) cls += " past";
+      else if (!next) { next = k; cls += " next"; }
+      html += '<div class="'+cls+'"><span>'+PRAYER_NAMES[k]+'</span><span>'+t+'</span></div>';
+    });
+    document.getElementById("p-list").innerHTML = html;
+    var foot = document.getElementById("p-foot");
+    if (next) {
+      var diff = toMin(timings[next].substring(0,5)) - nowMin, h = Math.floor(diff/60), m = diff % 60;
+      foot.textContent = PRAYER_NAMES[next] + " in " + (h ? h + " Std. " : "") + m + " Min.";
+    } else foot.textContent = "Alle Gebete für heute vorbei";
+  }
+
+  // ---------- Wetter (Open-Meteo) ----------
+  var WMO = {
+    0:["Klar","☀️"], 1:["Überwiegend klar","🌤️"], 2:["Teils bewölkt","⛅"], 3:["Bedeckt","☁️"],
+    45:["Nebel","🌫️"], 48:["Reifnebel","🌫️"],
+    51:["Leichter Nieselregen","🌦️"], 53:["Nieselregen","🌦️"], 55:["Starker Nieselregen","🌧️"],
+    61:["Leichter Regen","🌦️"], 63:["Regen","🌧️"], 65:["Starker Regen","🌧️"],
+    66:["Gefrierender Regen","🌧️"], 67:["Gefrierender Regen","🌧️"],
+    71:["Leichter Schneefall","🌨️"], 73:["Schneefall","🌨️"], 75:["Starker Schneefall","❄️"], 77:["Schneegriesel","🌨️"],
+    80:["Regenschauer","🌦️"], 81:["Regenschauer","🌧️"], 82:["Heftige Schauer","⛈️"],
+    85:["Schneeschauer","🌨️"], 86:["Schneeschauer","❄️"],
+    95:["Gewitter","⛈️"], 96:["Gewitter mit Hagel","⛈️"], 99:["Gewitter mit Hagel","⛈️"]
+  };
+  function wmo(code) { return WMO[code] || ["–","🌡️"]; }
+
+  function loadWeather() {
+    var url = "https://api.open-meteo.com/v1/forecast?latitude="+LAT+"&longitude="+LNG
+            + "&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m"
+            + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
+            + "&timezone=Europe%2FIstanbul&forecast_days=6";
+    fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+      var c = j.current, w = wmo(c.weather_code);
+      document.getElementById("w-now").innerHTML =
+        '<div class="w-icon">' + w[1] + '</div>' +
+        '<div><div class="w-temp">' + Math.round(c.temperature_2m) + '°</div></div>' +
+        '<div><div class="w-desc">' + w[0] + '</div>' +
+        '<div class="w-meta">Luftfeuchte ' + c.relative_humidity_2m + ' % · Wind ' + Math.round(c.wind_speed_10m) + ' km/h</div></div>';
+      var html = "";
+      for (var i = 1; i < j.daily.time.length; i++) {
+        var d = new Date(j.daily.time[i] + "T12:00:00"), dw = wmo(j.daily.weather_code[i]);
+        html += '<div class="w-day"><div>' + WEEKDAYS_SHORT[d.getDay()] + '</div>' +
+                '<div class="ic">' + dw[1] + '</div>' +
+                '<div>' + Math.round(j.daily.temperature_2m_max[i]) + '° <span class="lo">' +
+                Math.round(j.daily.temperature_2m_min[i]) + '°</span></div></div>';
+      }
+      document.getElementById("w-days").innerHTML = html;
+    }).catch(function () {
+      document.getElementById("w-now").innerHTML = '<span class="muted">Wetter nicht erreichbar</span>';
+    });
+  }
+
+  // ---------- Start & Aktualisierung ----------
+  tickClock(); renderCalendar(); loadPrayers(); loadWeather();
+  setInterval(tickClock, 1000);
+  setInterval(function () {
+    if (timingsFor !== dayKey(new Date())) { loadPrayers(); renderCalendar(); }
+    else renderPrayers();
+  }, 60000);
+  setInterval(loadWeather, 30 * 60000);                 // Wetter alle 30 Min.
+  setInterval(function () { location.reload(); }, 24 * 3600000); // Seite täglich neu laden
+})();
+</script>
+</body>
+</html>
